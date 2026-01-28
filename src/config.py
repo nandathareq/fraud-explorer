@@ -1,0 +1,13 @@
+LLM_ENGINE = "https://colab.research.google.com/drive/1KUwQadyT5acXY13u17xEKsb8ciKOEq_0?usp=sharing"
+LLM_MODEL = "qwen2.5:7b"
+EMBEDDING_MODEL = "nomic-embed-text"
+UNDERSTANDING_FRAUD_PDF_URL = "https://popcenter.asu.edu/sites/g/files/litvpz3631/files/problems/credit_card_fraud/PDFs/Bhatla.pdf"
+FRAUD_DATA_KAGGLE = "kartik2112/fraud-detection"
+CHUNK_SIZE = 500
+CHUNK_OVERLAP = 100
+db_path = "./db"
+sqlite = "fraud.db"
+sqlite_table = "fraud_data"
+data_path = "data"
+file_name = "understanding_fraud.pdf"
+top_K = 3
