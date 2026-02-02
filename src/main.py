@@ -3,30 +3,33 @@ import streamlit as st
 from util.llm import init_llm, app
 from config import LLM_ENGINE
 from util.data import init_data_pipeline
+import requests
+
+def initialize(url):
+    st.session_state.llm, st.session_state.embedding = init_llm(url)
+    st.session_state.db_path, st.session_state.vectordb = init_data_pipeline()         
+    st.rerun()
 
 # --- UI Setup ---
 st.title("APP_TITLE")
 
-# --- Utility Functions ---
-if "llm" not in st.session_state:
-    st.session_state.llm = None
-
 
 @st.dialog("Input LLM Engine URL")
-def initialize():
+def show_pop_up():
     st.write(f"open and run this collab { LLM_ENGINE}")
-    url = st.text_input("paste url here ..")
+    url = st.text_input("paste ngrok url here ..")
     if st.button("Submit"):
-        st.session_state.llm, st.session_state.embedding = init_llm(url)
-        st.write("initialize data")
-        if "db_path" not in st.session_state:
-            st.session_state.db_path, st.session_state.vectordb = init_data_pipeline()
-        st.rerun()
+        initialize(url)
+        
+        
+# --- Utility Functions ---
+if "llm" not in st.session_state:
+    try:
+        r = requests.get("http://localhost:11434/api/tags", timeout=2)
+        initialize(None)
+    except requests.exceptions.RequestException:
+        show_pop_up()
 
-# Streamed response emulator
-
-if not st.session_state.llm :
-    initialize()
 
 st.title("Simple chat")
 

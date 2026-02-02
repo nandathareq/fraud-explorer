@@ -9,11 +9,13 @@ from langchain_ollama import OllamaEmbeddings
 import sqlite3
 import re
 from tabulate import tabulate
+from langgraph.types import RetryPolicy
 
 class GraphState(TypedDict):
     question: str
     intent: Optional[str]
     result: Optional[Any]
+    last_errpr: str
 
 router_prompt = PromptTemplate.from_template("""
     Classify the following question into one of the categories below:
@@ -37,8 +39,7 @@ def router_node(state: GraphState):
     response = st.session_state.llm.invoke(
         router_prompt.format(question=state["question"])
     )
-    
-    print(response.content.strip())
+
     return {
         "intent": response.content.strip()
     }
@@ -70,7 +71,7 @@ def fraud_doc_node(state: GraphState):
     docs = st.session_state.vectordb.similarity_search(query, k=top_K)
 
     context = "\n\n".join([
-    f"--- Result {i+1} ---\n{doc.page_content}"
+    f"--- Result {i+1} ---\n\n{doc.page_content}"
     for i, doc in enumerate(docs)])
 
     prompt = f"""
@@ -94,7 +95,7 @@ def fraud_doc_node(state: GraphState):
     }
 
 def extract_sql(text):
-    pattern = r"```sql\s*(.*?)\s*```"
+    pattern = r"```sql\s*(.*?)\s*```|:"
     match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
     return match.group(1).strip() if match else None
 
@@ -104,7 +105,6 @@ def fraud_history_node(state: GraphState):
     try:
         cursor = conn.cursor()
 
-        # ---- Fetch table DDL safely ----
         cursor.execute(
             """
             SELECT sql
@@ -115,62 +115,66 @@ def fraud_history_node(state: GraphState):
         )
 
         row = cursor.fetchone()
-        if row is None or row[0] is None:
+        if not row or not row[0]:
             raise ValueError(f"Table '{sqlite_table}' does not exist")
 
         ddl = row[0]
 
-        # ---- Build SQL generation prompt ----
+        error_feedback = ""
+        if state.get("last_error"):
+            error_feedback = f"""
+            Previous SQL error:
+            {state['last_error']}
+
+            Fix the SQL accordingly.
+            """
+
         sql_prompt = f"""
         You are an expert SQL generator.
-        Your task is to write correct, efficient, and readable SQL queries
-        based strictly on the provided database schema and the user request.
 
         Rules:
-        - Use ONLY the tables and columns defined in the DDL
-        - Do NOT hallucinate tables or columns
-        - Use clear table aliases
-        - Only generate SELECT queries
-        - Always include a LIMIT (max 100 rows)
-        - Return ONLY the SQL query
+        - SQLite dialect only
+        - SELECT queries only
+        - Use only schema provided
+        - Always LIMIT 100
+        - Return ONLY SQL
+        - get only relevant column
 
         DDL:
         {ddl}
 
         User request:
         {state["question"]}
+
+        {error_feedback}
         """
 
-        # ---- Generate SQL ----
         sql_query = st.session_state.llm.invoke(sql_prompt).content
         sql = extract_sql(sql_query).strip()
+        
+        print(sql)
 
-        # ---- Hard safety check ----
-        normalized_sql = sql.lower()
-        if not normalized_sql.startswith("select"):
+        if not sql.lower().startswith("select"):
             raise ValueError("Only SELECT queries are allowed")
 
-        if "limit" not in normalized_sql:
+        if "limit" not in sql.lower():
             sql += " LIMIT 100"
 
-        # ---- Execute SQL ----
-        cursor.execute(sql)
+        try:
+            cursor.execute(sql)
+        except Exception as e:
+            raise ValueError(f"SQL execution error: {str(e)}")
 
         if cursor.description is None:
             raise ValueError("Query returned no columns")
 
-        columns = [col[0] for col in cursor.description]
+        columns = [c[0] for c in cursor.description]
         rows = cursor.fetchmany(100)
 
-        sql_result = tabulate(
-            rows,
-            headers=columns,
-            tablefmt="psql"
-        )
+        sql_result = tabulate(rows, headers=columns, tablefmt="psql")
 
-        # ---- Summarization ----
         summary_prompt = f"""
-        Based on the following table:
+        Based on the following information:
 
         {sql_result}
 
@@ -184,8 +188,14 @@ def fraud_history_node(state: GraphState):
             }
         }
 
+    except Exception as e:
+        state["last_error"] = str(e)
+        print(str(e))
+        raise 
+
     finally:
         conn.close()
+
 
 
 graph = StateGraph(GraphState)
@@ -193,7 +203,10 @@ graph = StateGraph(GraphState)
 graph.add_node("router", router_node)
 graph.add_node("general", general_llm_node)
 graph.add_node("fraud_doc", fraud_doc_node)
-graph.add_node("fraud_history", fraud_history_node)
+graph.add_node("fraud_history", fraud_history_node,    
+        retry=RetryPolicy(
+        max_attempts=3,
+    ))
 
 graph.set_entry_point("router")
 
