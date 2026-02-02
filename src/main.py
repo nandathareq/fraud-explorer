@@ -26,12 +26,9 @@ def show_pop_up():
 if "llm" not in st.session_state:
     try:
         r = requests.get("http://localhost:11434/api/tags", timeout=2)
-        initialize(None)
+        initialize("http://localhost:11434/")
     except requests.exceptions.RequestException:
         show_pop_up()
-
-
-st.title("Simple chat")
 
 # Initialize chat history
 if "messages" not in st.session_state:
