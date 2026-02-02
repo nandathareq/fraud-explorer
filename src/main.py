@@ -11,12 +11,12 @@ def initialize(url):
     st.rerun()
 
 # --- UI Setup ---
-st.title("APP_TITLE")
+st.title("FRAUD Explorer")
 
 
 @st.dialog("Input LLM Engine URL")
 def show_pop_up():
-    st.write(f"open and run this collab { LLM_ENGINE}")
+    st.write(f"open and run this collab { LLM_ENGINE }")
     url = st.text_input("paste ngrok url here ..")
     if st.button("Submit"):
         initialize(url)
@@ -26,7 +26,7 @@ def show_pop_up():
 if "llm" not in st.session_state:
     try:
         r = requests.get("http://localhost:11434/api/tags", timeout=2)
-        initialize("http://localhost:11434/")
+        initialize(None)
     except requests.exceptions.RequestException:
         show_pop_up()
 
@@ -51,7 +51,7 @@ if prompt := st.chat_input("Ask me?"):
     with st.chat_message("assistant"):
         result = app.invoke({"question": prompt})["result"]
 
-        full_answer = []  # list, bukan string
+        full_answer = []
 
         def collect_stream():
             for chunk in result["stream"]:
@@ -60,6 +60,10 @@ if prompt := st.chat_input("Ask me?"):
 
         if result.get("references"):
             st.markdown(result["references"])
+            st.session_state.messages.append({
+                "role": "system",
+                "content": result["references"]
+            })
         st.write_stream(collect_stream())
 
     st.session_state.messages.append({
